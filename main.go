@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"runtime"
 	"runtime/pprof"
 	"strings"
 	"text/template"
@@ -287,6 +288,40 @@ func createDb(totalUsers int) error {
 	return nil
 }
 
+func monitorHeapSize(ctx context.Context) {
+	var mem runtime.MemStats
+
+	maxAlloc := uint64(0)
+
+	t := time.NewTicker(200 * time.Millisecond)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			runtime.ReadMemStats(&mem)
+			if mem.HeapAlloc > maxAlloc {
+				maxAlloc = mem.HeapAlloc
+				memSize := convertHumanReadable(maxAlloc)
+				fmt.Fprintf(os.Stderr, "MaxAlloc: %s\n", memSize)
+			}
+		}
+	}
+}
+
+func convertHumanReadable(alloc uint64) string {
+	const unit = 1024
+	if alloc < unit {
+		return fmt.Sprintf("%d B", alloc)
+	}
+	div, exp := int64(unit), 0
+	for n := alloc / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(alloc)/float64(div), "KMGTPE"[exp])
+}
+
 func main() {
 	// start mem profile
 	go func() {
@@ -317,6 +352,11 @@ func main() {
 			var err error
 			streaming, _ := cmd.Flags().GetBool("streaming")
 			streamingString, _ := cmd.Flags().GetBool("streaming-string")
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			go monitorHeapSize(ctx)
 
 			if streamingString {
 				err = generateStreamingStringMarkdown()
