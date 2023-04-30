@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"text/template"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func generateStreamingStringMarkdown() error {

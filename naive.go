@@ -6,6 +6,8 @@ import (
 	"os"
 	"text/template"
 	"unsafe"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 const markdownTemplate = `
