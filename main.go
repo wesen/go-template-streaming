@@ -37,8 +37,7 @@ const markdownTemplate = `
 | Email | First Name | Last Name | Address | City | Zip |
 |-------|------------|-----------|---------|------|-----|
 {{range .}}
-| {{.Email}} | {{.FirstName}} | {{.LastName}} | {{.Address}} | {{.City}} | {{.Zip}} |
-{{end}}
+| {{.Email}} | {{.FirstName}} | {{.LastName}} | {{.Address}} | {{.City}} | {{.Zip}} |{{end}}
 `
 
 func generateMarkdown() error {
