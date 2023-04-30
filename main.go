@@ -3,14 +3,20 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"math/rand"
+	"net/http"
 	"os"
+	"runtime/pprof"
 	"strings"
 	"text/template"
 	"time"
+	"unsafe"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/spf13/cobra"
+
+	_ "net/http/pprof"
 )
 
 type User struct {
@@ -53,14 +59,19 @@ func generateMarkdown() error {
 	}
 	defer rows.Close()
 
+	totalSize := 0
 	var users []User
 	for rows.Next() {
 		var user User
 		if err := rows.Scan(&user.Email, &user.FirstName, &user.LastName, &user.Address, &user.City, &user.Zip); err != nil {
 			return err
 		}
+		totalSize += int(unsafe.Sizeof(user))
 		users = append(users, user)
 	}
+
+	totalSize += int(unsafe.Sizeof(users))
+	log.Printf("Size of users: %d bytes\n", totalSize)
 
 	tmpl, err := template.New("markdown").Parse(markdownTemplate)
 	if err != nil {
@@ -68,11 +79,29 @@ func generateMarkdown() error {
 	}
 
 	err = tmpl.Execute(os.Stdout, users)
+	log.Println("Successfully generated markdown table.")
+
+	// write mem profile
+	f, err := os.Create("mem.prof")
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	err = pprof.WriteHeapProfile(f)
+	if err != nil {
+		return err
+	}
+
+	log.Println(`
+	To view the memory profile, run the following command:
+	go tool pprof mem.prof
+	go tool pprof -alloc_space mem.prof`)
 
 	return nil
 }
 
-func createDb() error {
+func createDb(totalUsers int) error {
 	// delete users.db
 	if _, err := os.Stat("users.db"); err == nil {
 		err := os.Remove("users.db")
@@ -108,8 +137,7 @@ func createDb() error {
 	VALUES %s
 	`
 
-	totalUsers := 100000
-	usersPerBatch := 1000
+	usersPerBatch := 10000
 	rowsToInsert := make([]string, usersPerBatch)
 
 	for i := 0; i < totalUsers; i++ {
@@ -130,11 +158,16 @@ func createDb() error {
 		}
 	}
 
-	fmt.Println("Successfully inserted 1M random users into the database.")
+	fmt.Printf("Successfully inserted %d random users into the database.\n", totalUsers)
 	return nil
 }
 
 func main() {
+	// start mem profile
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+
 	rootCmd := &cobra.Command{
 		Use:   "go-template-streaming",
 		Short: "Simple demonstration of streaming from a DB into a template",
@@ -144,10 +177,13 @@ func main() {
 		Use:   "create",
 		Short: "Create a test database",
 		Run: func(cmd *cobra.Command, args []string) {
-			err := createDb()
+			totalUsers, _ := cmd.Flags().GetInt("total-users")
+			err := createDb(totalUsers)
 			cobra.CheckErr(err)
 		},
 	}
+
+	createCmd.Flags().Int("total-users", 1000000, "Total number of users to insert into the database")
 
 	generateCmd := &cobra.Command{
 		Use:   "generate",
