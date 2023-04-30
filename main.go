@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -15,6 +16,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 
 	_ "net/http/pprof"
 )
@@ -45,6 +47,141 @@ const markdownTemplate = `
 {{range .}}
 | {{.Email}} | {{.FirstName}} | {{.LastName}} | {{.Address}} | {{.City}} | {{.Zip}} |{{end}}
 `
+
+const markdownStringTemplate = `
+| Email | First Name | Last Name | Address | City | Zip |
+|-------|------------|-----------|---------|------|-----|
+{{range .}}|{{.}}|{{end}}
+`
+
+func generateStreamingStringMarkdown() error {
+	eg, ctx := errgroup.WithContext(context.Background())
+
+	c := make(chan string)
+
+	eg.Go(func() error {
+		defer close(c)
+
+		db, err := sql.Open("sqlite3", "users.db")
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		rows, err := db.QueryContext(ctx, `SELECT (email || '|' || first_name || '|' || last_name || '|' || address || '|' || city || '|' || zip) FROM users`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				return err
+			}
+			c <- s
+		}
+
+		return nil
+	})
+
+	eg.Go(func() error {
+		tmpl, err := template.New("markdown").Parse(markdownStringTemplate)
+		if err != nil {
+			return err
+		}
+
+		err = tmpl.Execute(os.Stdout, c)
+		log.Println("Successfully generated markdown table.")
+
+		return err
+	})
+
+	err := eg.Wait()
+	if err != nil {
+		return err
+	}
+
+	err = writeProfile("mem-streaming.prof")
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func generateStreamingMarkdown() error {
+	eg, ctx := errgroup.WithContext(context.Background())
+
+	c := make(chan User)
+
+	eg.Go(func() error {
+		defer close(c)
+
+		db, err := sql.Open("sqlite3", "users.db")
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		rows, err := db.QueryContext(ctx, `SELECT email, first_name, last_name, address, city, zip FROM users`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var user User
+			if err := rows.Scan(&user.Email, &user.FirstName, &user.LastName, &user.Address, &user.City, &user.Zip); err != nil {
+				return err
+			}
+			c <- user
+		}
+
+		return nil
+	})
+
+	eg.Go(func() error {
+		tmpl, err := template.New("markdown").Parse(markdownTemplate)
+		if err != nil {
+			return err
+		}
+
+		err = tmpl.Execute(os.Stdout, c)
+		log.Println("Successfully generated markdown table.")
+
+		return err
+	})
+
+	err := eg.Wait()
+	if err != nil {
+		return err
+	}
+
+	err = writeProfile("mem-streaming.prof")
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func writeProfile(filepath string) error {
+	// write mem profile
+	f, err := os.Create(filepath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	err = pprof.WriteHeapProfile(f)
+	if err != nil {
+		return err
+	}
+
+	log.Printf(`
+	To view the memory profile, run the following command:
+	go tool pprof %s
+	go tool pprof -alloc_space %s
+`, filepath, filepath)
+	return nil
+}
 
 func generateMarkdown() error {
 	db, err := sql.Open("sqlite3", "users.db")
@@ -81,22 +218,10 @@ func generateMarkdown() error {
 	err = tmpl.Execute(os.Stdout, users)
 	log.Println("Successfully generated markdown table.")
 
-	// write mem profile
-	f, err := os.Create("mem.prof")
+	err = writeProfile("mem.prof")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-
-	err = pprof.WriteHeapProfile(f)
-	if err != nil {
-		return err
-	}
-
-	log.Println(`
-	To view the memory profile, run the following command:
-	go tool pprof mem.prof
-	go tool pprof -alloc_space mem.prof`)
 
 	return nil
 }
@@ -189,10 +314,23 @@ func main() {
 		Use:   "generate",
 		Short: "Generate a markdown table from the test database",
 		Run: func(cmd *cobra.Command, args []string) {
-			err := generateMarkdown()
+			var err error
+			streaming, _ := cmd.Flags().GetBool("streaming")
+			streamingString, _ := cmd.Flags().GetBool("streaming-string")
+
+			if streamingString {
+				err = generateStreamingStringMarkdown()
+			} else if streaming {
+				err = generateStreamingMarkdown()
+			} else {
+				err = generateMarkdown()
+			}
 			cobra.CheckErr(err)
 		},
 	}
+
+	generateCmd.Flags().Bool("streaming", false, "Whether to stream the data from the DB or not")
+	generateCmd.Flags().Bool("streaming-string", false, "Whether to stream the data from the DB as a string or not")
 
 	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(generateCmd)
