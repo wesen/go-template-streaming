@@ -3,8 +3,10 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"math/rand"
+	"os"
+	"strings"
+	"text/template"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -31,10 +33,58 @@ func randomString(length int) string {
 	return string(result)
 }
 
-func createDb() error {
+const markdownTemplate = `
+| Email | First Name | Last Name | Address | City | Zip |
+|-------|------------|-----------|---------|------|-----|
+{{range .}}
+| {{.Email}} | {{.FirstName}} | {{.LastName}} | {{.Address}} | {{.City}} | {{.Zip}} |
+{{end}}
+`
+
+func generateMarkdown() error {
 	db, err := sql.Open("sqlite3", "users.db")
 	if err != nil {
-		log.Fatal(err)
+		return err
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT email, first_name, last_name, address, city, zip FROM users`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var user User
+		if err := rows.Scan(&user.Email, &user.FirstName, &user.LastName, &user.Address, &user.City, &user.Zip); err != nil {
+			return err
+		}
+		users = append(users, user)
+	}
+
+	tmpl, err := template.New("markdown").Parse(markdownTemplate)
+	if err != nil {
+		return err
+	}
+
+	err = tmpl.Execute(os.Stdout, users)
+
+	return nil
+}
+
+func createDb() error {
+	// delete users.db
+	if _, err := os.Stat("users.db"); err == nil {
+		err := os.Remove("users.db")
+		if err != nil {
+			return err
+		}
+	}
+
+	db, err := sql.Open("sqlite3", "users.db")
+	if err != nil {
+		return err
 	}
 	defer db.Close()
 
@@ -51,20 +101,18 @@ func createDb() error {
 	`
 	_, err = db.Exec(createTableQuery)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	insertUserQuery := `
 	INSERT INTO users (email, first_name, last_name, address, city, zip)
-	VALUES (?, ?, ?, ?, ?, ?);
+	VALUES %s
 	`
-	stmt, err := db.Prepare(insertUserQuery)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer stmt.Close()
 
-	totalUsers := 1000000
+	totalUsers := 100000
+	usersPerBatch := 1000
+	rowsToInsert := make([]string, usersPerBatch)
+
 	for i := 0; i < totalUsers; i++ {
 		user := User{
 			Email:     fmt.Sprintf("%s@example.com", randomString(10)),
@@ -75,22 +123,21 @@ func createDb() error {
 			Zip:       randomString(5),
 		}
 
-		_, err = stmt.Exec(user.Email, user.FirstName, user.LastName, user.Address, user.City, user.Zip)
-		if err != nil {
-			log.Fatal(err)
-		}
+		rowsToInsert[i%usersPerBatch] = fmt.Sprintf("('%s', '%s', '%s', '%s', '%s', '%s')", user.Email, user.FirstName, user.LastName, user.Address, user.City, user.Zip)
 
-		if i%100000 == 0 {
-			fmt.Printf("Inserted %d users\n", i)
+		if i%usersPerBatch == 0 {
+			_, err = db.Exec(fmt.Sprintf(insertUserQuery, strings.Join(rowsToInsert, ",")))
+			fmt.Printf("Inserted %d/%d users\n", i, totalUsers)
 		}
 	}
 
 	fmt.Println("Successfully inserted 1M random users into the database.")
+	return nil
 }
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "go-template-streamin",
+		Use:   "go-template-streaming",
 		Short: "Simple demonstration of streaming from a DB into a template",
 	}
 
@@ -103,7 +150,17 @@ func main() {
 		},
 	}
 
+	generateCmd := &cobra.Command{
+		Use:   "generate",
+		Short: "Generate a markdown table from the test database",
+		Run: func(cmd *cobra.Command, args []string) {
+			err := generateMarkdown()
+			cobra.CheckErr(err)
+		},
+	}
+
 	rootCmd.AddCommand(createCmd)
+	rootCmd.AddCommand(generateCmd)
 
 	err := rootCmd.Execute()
 	cobra.CheckErr(err)
