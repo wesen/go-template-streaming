@@ -24,7 +24,7 @@ func convertHumanReadable(alloc uint64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(alloc)/float64(div), "KMGTPE"[exp])
 }
 
-func monitorHeapSize(ctx context.Context) {
+func monitorHeapSize(ctx context.Context, withTriggerGC bool) {
 	var mem runtime.MemStats
 
 	maxAlloc := uint64(0)
@@ -35,6 +35,10 @@ func monitorHeapSize(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			// trigger gc
+			if withTriggerGC {
+				runtime.GC()
+			}
 			runtime.ReadMemStats(&mem)
 			if mem.HeapAlloc > maxAlloc {
 				maxAlloc = mem.HeapAlloc

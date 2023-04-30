@@ -41,11 +41,12 @@ func main() {
 			var err error
 			streaming, _ := cmd.Flags().GetBool("streaming")
 			streamingString, _ := cmd.Flags().GetBool("streaming-string")
+			triggerGC, _ := cmd.Flags().GetBool("trigger-gc")
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			go monitorHeapSize(ctx)
+			go monitorHeapSize(ctx, triggerGC)
 
 			start := time.Now()
 			if streamingString {
@@ -63,6 +64,7 @@ func main() {
 
 	generateCmd.Flags().Bool("streaming", false, "Whether to stream the data from the DB or not")
 	generateCmd.Flags().Bool("streaming-string", false, "Whether to stream the data from the DB as a string or not")
+	generateCmd.Flags().Bool("trigger-gc", false, "Whether to trigger a GC before measuring max heap")
 
 	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(generateCmd)
