@@ -358,6 +358,7 @@ func main() {
 
 			go monitorHeapSize(ctx)
 
+			start := time.Now()
 			if streamingString {
 				err = generateStreamingStringMarkdown()
 			} else if streaming {
@@ -365,6 +366,8 @@ func main() {
 			} else {
 				err = generateMarkdown()
 			}
+			elapsed := time.Since(start)
+			log.Printf("Time elapsed: %s\n", elapsed)
 			cobra.CheckErr(err)
 		},
 	}
