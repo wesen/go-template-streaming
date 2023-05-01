@@ -1,7 +1,5 @@
 # Rendering a template in go: a performance optimization tale
 
-Points:
-
 ## Introduction
 
 I have been building out the web functionality of [sqleton](https://github.com/go-go-golems/sqleton)
