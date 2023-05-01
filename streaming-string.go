@@ -11,6 +11,12 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+const markdownStringTemplate = `
+| Email | First Name | Last Name | Address | City | Zip |
+|-------|------------|-----------|---------|------|-----|
+{{range .}}|{{.}}|{{end}}
+`
+
 func generateStreamingStringMarkdown() error {
 	eg, ctx := errgroup.WithContext(context.Background())
 
@@ -64,9 +70,3 @@ func generateStreamingStringMarkdown() error {
 
 	return nil
 }
-
-const markdownStringTemplate = `
-| Email | First Name | Last Name | Address | City | Zip |
-|-------|------------|-----------|---------|------|-----|
-{{range .}}|{{.}}|{{end}}
-`

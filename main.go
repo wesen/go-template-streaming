@@ -7,8 +7,6 @@ import (
 	"log"
 	"net/http"
 	"time"
-
-	_ "net/http/pprof"
 )
 
 func main() {
